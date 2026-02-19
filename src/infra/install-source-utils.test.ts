@@ -87,6 +87,8 @@ describe("resolveArchiveSourcePath", () => {
 describe("packNpmSpecToArchive", () => {
   it("packs spec and returns archive path using the final non-empty stdout line", async () => {
     const cwd = await createTempDir("openclaw-install-source-utils-");
+    const archivePath = path.join(cwd, "openclaw-plugin-1.2.3.tgz");
+    await fs.writeFile(archivePath, "", "utf-8");
     runCommandWithTimeoutMock.mockResolvedValue({
       stdout: "npm notice created package\nopenclaw-plugin-1.2.3.tgz\n",
       stderr: "",
@@ -103,7 +105,7 @@ describe("packNpmSpecToArchive", () => {
 
     expect(result).toEqual({
       ok: true,
-      archivePath: path.join(cwd, "openclaw-plugin-1.2.3.tgz"),
+      archivePath,
     });
     expect(runCommandWithTimeoutMock).toHaveBeenCalledWith(
       ["npm", "pack", "openclaw-plugin@1.2.3", "--ignore-scripts"],
@@ -112,6 +114,53 @@ describe("packNpmSpecToArchive", () => {
         timeoutMs: 300_000,
       }),
     );
+  });
+
+  it("falls back to a created tgz archive when stdout has no archive filename", async () => {
+    const cwd = await createTempDir("openclaw-install-source-utils-");
+    const archivePath = path.join(cwd, "openclaw-plugin-1.2.3.tgz");
+    await fs.writeFile(archivePath, "", "utf-8");
+    runCommandWithTimeoutMock.mockResolvedValue({
+      stdout: "\n",
+      stderr: "",
+      code: 0,
+      signal: null,
+      killed: false,
+    });
+
+    const result = await packNpmSpecToArchive({
+      spec: "openclaw-plugin@1.2.3",
+      timeoutMs: 1000,
+      cwd,
+    });
+
+    expect(result).toEqual({ ok: true, archivePath });
+  });
+
+  it("falls back to the newest tgz when stdout points to no file", async () => {
+    const cwd = await createTempDir("openclaw-install-source-utils-");
+    const olderArchivePath = path.join(cwd, "openclaw-plugin-1.2.2.tgz");
+    const newerArchivePath = path.join(cwd, "openclaw-plugin-1.2.3.tgz");
+    await fs.writeFile(olderArchivePath, "", "utf-8");
+    await fs.writeFile(newerArchivePath, "", "utf-8");
+    await fs.utimes(olderArchivePath, new Date(1000), new Date(1000));
+    await fs.utimes(newerArchivePath, new Date(2000), new Date(2000));
+
+    runCommandWithTimeoutMock.mockResolvedValue({
+      stdout: "npm notice filename: openclaw-plugin-1.2.4.tgz\n",
+      stderr: "",
+      code: 0,
+      signal: null,
+      killed: false,
+    });
+
+    const result = await packNpmSpecToArchive({
+      spec: "openclaw-plugin@1.2.3",
+      timeoutMs: 1000,
+      cwd,
+    });
+
+    expect(result).toEqual({ ok: true, archivePath: newerArchivePath });
   });
 
   it("returns npm pack error details when command fails", async () => {

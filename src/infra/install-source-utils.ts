@@ -69,10 +69,34 @@ export async function packNpmSpecToArchive(params: {
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean)
-    .pop();
-  if (!packed) {
+    .toReversed()
+    .find((line) => line.endsWith(".tgz"));
+
+  if (packed) {
+    const packedPath = path.isAbsolute(packed) ? packed : path.join(params.cwd, packed);
+    if (await fileExists(packedPath)) {
+      return { ok: true, archivePath: packedPath };
+    }
+  }
+
+  const archives = (await fs.readdir(params.cwd, { withFileTypes: true }))
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".tgz"))
+    .map((entry) => path.join(params.cwd, entry.name));
+
+  if (archives.length === 0) {
     return { ok: false, error: "npm pack produced no archive" };
   }
 
-  return { ok: true, archivePath: path.join(params.cwd, packed) };
+  if (archives.length === 1) {
+    return { ok: true, archivePath: archives[0] };
+  }
+
+  const mtimeByArchive = await Promise.all(
+    archives.map(async (archivePath) => {
+      const stat = await fs.stat(archivePath);
+      return { archivePath, mtimeMs: stat.mtimeMs };
+    }),
+  );
+  mtimeByArchive.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return { ok: true, archivePath: mtimeByArchive[0].archivePath };
 }
