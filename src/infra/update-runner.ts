@@ -20,6 +20,7 @@ import {
 import { compareSemverStrings } from "./update-check.js";
 import {
   cleanupGlobalRenameDirs,
+  detectCompanionPrefixInstallForRoot,
   detectGlobalInstallManagerForRoot,
   globalInstallArgs,
   globalInstallFallbackArgs,
@@ -867,7 +868,10 @@ export async function runGatewayUpdate(opts: UpdateRunnerOptions = {}): Promise<
 
   const beforeVersion = await readPackageVersion(pkgRoot);
   const globalManager = await detectGlobalInstallManagerForRoot(runCommand, pkgRoot, timeoutMs);
-  if (globalManager) {
+  const companionInstall =
+    globalManager == null ? await detectCompanionPrefixInstallForRoot(pkgRoot) : null;
+  const effectiveGlobalManager = globalManager ?? companionInstall?.manager ?? null;
+  if (effectiveGlobalManager) {
     const packageName = (await readPackageName(pkgRoot)) ?? DEFAULT_PACKAGE_NAME;
     await cleanupGlobalRenameDirs({
       globalRoot: path.dirname(pkgRoot),
@@ -877,10 +881,14 @@ export async function runGatewayUpdate(opts: UpdateRunnerOptions = {}): Promise<
     const tag = normalizeTag(opts.tag ?? channelToNpmTag(channel));
     const spec = `${packageName}@${tag}`;
     const steps: UpdateStepResult[] = [];
+    const installArgs = globalInstallArgs(effectiveGlobalManager, spec, {
+      prefix: companionInstall?.prefix,
+      npmExecutable: companionInstall?.npmExecutable,
+    });
     const updateStep = await runStep({
       runCommand,
       name: "global update",
-      argv: globalInstallArgs(globalManager, spec),
+      argv: installArgs,
       cwd: pkgRoot,
       timeoutMs,
       progress,
@@ -891,7 +899,7 @@ export async function runGatewayUpdate(opts: UpdateRunnerOptions = {}): Promise<
 
     let finalStep = updateStep;
     if (updateStep.exitCode !== 0) {
-      const fallbackArgv = globalInstallFallbackArgs(globalManager, spec);
+      const fallbackArgv = globalInstallFallbackArgs(effectiveGlobalManager, spec);
       if (fallbackArgv) {
         const fallbackStep = await runStep({
           runCommand,
@@ -911,7 +919,7 @@ export async function runGatewayUpdate(opts: UpdateRunnerOptions = {}): Promise<
     const afterVersion = await readPackageVersion(pkgRoot);
     return {
       status: finalStep.exitCode === 0 ? "ok" : "error",
-      mode: globalManager,
+      mode: effectiveGlobalManager,
       root: pkgRoot,
       reason: finalStep.exitCode === 0 ? undefined : finalStep.name,
       before: { version: beforeVersion },
