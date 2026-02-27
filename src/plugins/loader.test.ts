@@ -284,6 +284,16 @@ describe("loadOpenClawPlugins", () => {
     const memory = registry.plugins.find((entry) => entry.id === "memory-core");
     expect(memory?.status).toBe("disabled");
     expect(memory?.error).toBe("disabled in config");
+    expect(
+      registry.diagnostics.some(
+        (entry) => entry.message === "memory slot plugin disabled in config: memory-core",
+      ),
+    ).toBe(true);
+    expect(
+      registry.diagnostics.some((entry) =>
+        entry.message.includes("memory slot plugin not found or not marked as memory"),
+      ),
+    ).toBe(false);
   });
 
   it("preserves package.json metadata for bundled memory plugins", () => {

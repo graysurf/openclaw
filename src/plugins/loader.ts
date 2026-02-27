@@ -455,6 +455,7 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
   const memorySlot = normalized.slots.memory;
   let selectedMemoryPluginId: string | null = null;
   let memorySlotMatched = false;
+  let memorySlotDisabledByConfig = false;
 
   for (const candidate of discovery.candidates) {
     const manifestRecord = manifestByRoot.get(candidate.rootDir);
@@ -504,6 +505,10 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
     record.configJsonSchema = manifestRecord.configSchema;
 
     if (!enableState.enabled) {
+      if (memorySlot === record.id && enableState.reason === "disabled in config") {
+        memorySlotMatched = true;
+        memorySlotDisabledByConfig = true;
+      }
       record.status = "disabled";
       record.error = enableState.reason;
       registry.plugins.push(record);
@@ -695,11 +700,18 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
     }
   }
 
-  if (typeof memorySlot === "string" && !memorySlotMatched) {
-    registry.diagnostics.push({
-      level: "warn",
-      message: `memory slot plugin not found or not marked as memory: ${memorySlot}`,
-    });
+  if (typeof memorySlot === "string") {
+    if (memorySlotDisabledByConfig) {
+      registry.diagnostics.push({
+        level: "warn",
+        message: `memory slot plugin disabled in config: ${memorySlot}`,
+      });
+    } else if (!memorySlotMatched) {
+      registry.diagnostics.push({
+        level: "warn",
+        message: `memory slot plugin not found or not marked as memory: ${memorySlot}`,
+      });
+    }
   }
 
   warnAboutUntrackedLoadedPlugins({
