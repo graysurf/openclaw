@@ -255,6 +255,37 @@ describe("loadOpenClawPlugins", () => {
     expect(memory?.status).toBe("loaded");
   });
 
+  it("keeps explicit memory plugin disable authoritative over slot selection", () => {
+    const bundledDir = makeTempDir();
+    writePlugin({
+      id: "memory-core",
+      body: `export default { id: "memory-core", kind: "memory", register() {} };`,
+      dir: bundledDir,
+      filename: "memory-core.js",
+    });
+    process.env.OPENCLAW_BUNDLED_PLUGINS_DIR = bundledDir;
+
+    const registry = loadOpenClawPlugins({
+      cache: false,
+      config: {
+        plugins: {
+          slots: {
+            memory: "memory-core",
+          },
+          entries: {
+            "memory-core": {
+              enabled: false,
+            },
+          },
+        },
+      },
+    });
+
+    const memory = registry.plugins.find((entry) => entry.id === "memory-core");
+    expect(memory?.status).toBe("disabled");
+    expect(memory?.error).toBe("disabled in config");
+  });
+
   it("preserves package.json metadata for bundled memory plugins", () => {
     const registry = loadBundledMemoryPluginRegistry({
       packageMeta: {

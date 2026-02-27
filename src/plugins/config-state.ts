@@ -176,15 +176,15 @@ export function resolveEnableState(
   if (config.allow.length > 0 && !config.allow.includes(id)) {
     return { enabled: false, reason: "not in allowlist" };
   }
-  if (config.slots.memory === id) {
-    return { enabled: true };
-  }
   const entry = config.entries[id];
+  if (entry?.enabled === false) {
+    return { enabled: false, reason: "disabled in config" };
+  }
   if (entry?.enabled === true) {
     return { enabled: true };
   }
-  if (entry?.enabled === false) {
-    return { enabled: false, reason: "disabled in config" };
+  if (config.slots.memory === id) {
+    return { enabled: true };
   }
   if (origin === "bundled" && BUNDLED_ENABLED_BY_DEFAULT.has(id)) {
     return { enabled: true };

@@ -92,4 +92,25 @@ describe("resolveEffectiveEnableState", () => {
     });
     expect(state).toEqual({ enabled: false, reason: "disabled in config" });
   });
+
+  it("keeps explicit memory plugin disable authoritative over memory slot binding", () => {
+    const normalized = normalizePluginsConfig({
+      enabled: true,
+      slots: {
+        memory: "memory-core",
+      },
+      entries: {
+        "memory-core": {
+          enabled: false,
+        },
+      },
+    });
+    const state = resolveEffectiveEnableState({
+      id: "memory-core",
+      origin: "bundled",
+      config: normalized,
+      rootConfig: {},
+    });
+    expect(state).toEqual({ enabled: false, reason: "disabled in config" });
+  });
 });
