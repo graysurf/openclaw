@@ -82,6 +82,7 @@ const OPEN_DM_POLICY_ALLOW_FROM_RE =
 
 const CONFIG_AUDIT_LOG_FILENAME = "config-audit.jsonl";
 const loggedInvalidConfigs = new Set<string>();
+const loggedFutureVersionWarnings = new Set<string>();
 
 type ConfigWriteAuditResult = "rename" | "copy-fallback" | "failed";
 
@@ -571,7 +572,11 @@ function stampConfigVersion(cfg: OpenClawConfig): OpenClawConfig {
   };
 }
 
-function warnIfConfigFromFuture(cfg: OpenClawConfig, logger: Pick<typeof console, "warn">): void {
+function warnIfConfigFromFuture(
+  cfg: OpenClawConfig,
+  logger: Pick<typeof console, "warn">,
+  configPath: string,
+): void {
   const touched = cfg.meta?.lastTouchedVersion;
   if (!touched) {
     return;
@@ -581,6 +586,11 @@ function warnIfConfigFromFuture(cfg: OpenClawConfig, logger: Pick<typeof console
     return;
   }
   if (cmp < 0) {
+    const warningKey = `${configPath}:${touched}:${VERSION}`;
+    if (loggedFutureVersionWarnings.has(warningKey)) {
+      return;
+    }
+    loggedFutureVersionWarnings.add(warningKey);
     logger.warn(
       `Config was last written by a newer OpenClaw (${touched}); current version is ${VERSION}.`,
     );
@@ -731,7 +741,7 @@ export function createConfigIO(overrides: ConfigIoDeps = {}) {
           .join("\n");
         deps.logger.warn(`Config warnings:\\n${details}`);
       }
-      warnIfConfigFromFuture(validated.config, deps.logger);
+      warnIfConfigFromFuture(validated.config, deps.logger, configPath);
       const cfg = applyTalkConfigNormalization(
         applyModelDefaults(
           applyCompactionDefaults(
@@ -946,7 +956,7 @@ export function createConfigIO(overrides: ConfigIoDeps = {}) {
         };
       }
 
-      warnIfConfigFromFuture(validated.config, deps.logger);
+      warnIfConfigFromFuture(validated.config, deps.logger, configPath);
       const snapshotConfig = normalizeConfigPaths(
         applyTalkApiKey(
           applyTalkConfigNormalization(
