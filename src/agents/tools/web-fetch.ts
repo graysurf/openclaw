@@ -680,7 +680,8 @@ async function runWebFetch(params: WebFetchRuntimeParams): Promise<Record<string
 function formatWebFetchPrimaryContent(result: Record<string, unknown>): string {
   const text = result.text;
   if (typeof text === "string" && text.trim().length > 0) {
-    return text;
+    const notice = formatWebFetchPrimaryNotice(result);
+    return notice ? `${notice}\n\n${text}` : text;
   }
 
   try {
@@ -693,6 +694,58 @@ function formatWebFetchPrimaryContent(result: Record<string, unknown>): string {
   }
 
   return "[web_fetch] extracted content unavailable; inspect details for metadata.";
+}
+
+function formatWebFetchPrimaryNotice(result: Record<string, unknown>): string | undefined {
+  const truncated = result.truncated === true;
+  const warning = typeof result.warning === "string" ? result.warning.trim() : "";
+  if (!truncated && !warning) {
+    return undefined;
+  }
+
+  const parts: string[] = [];
+  const finalUrl = typeof result.finalUrl === "string" ? result.finalUrl.trim() : "";
+  if (finalUrl) {
+    parts.push(`url=${finalUrl}`);
+  }
+  const status = typeof result.status === "number" ? result.status : undefined;
+  if (status !== undefined) {
+    parts.push(`status=${status}`);
+  }
+  const contentType = typeof result.contentType === "string" ? result.contentType.trim() : "";
+  if (contentType) {
+    parts.push(`contentType=${contentType}`);
+  }
+  const extractor = typeof result.extractor === "string" ? result.extractor.trim() : "";
+  if (extractor) {
+    parts.push(`extractor=${extractor}`);
+  }
+
+  if (truncated) {
+    const rawLength = typeof result.rawLength === "number" ? result.rawLength : undefined;
+    const wrappedLength =
+      typeof result.wrappedLength === "number" ? result.wrappedLength : undefined;
+    if (
+      rawLength !== undefined &&
+      wrappedLength !== undefined &&
+      Number.isFinite(rawLength) &&
+      Number.isFinite(wrappedLength) &&
+      rawLength > wrappedLength
+    ) {
+      parts.push(`truncated=${wrappedLength}/${rawLength} chars`);
+    } else {
+      parts.push("truncated=true");
+    }
+  }
+
+  if (warning) {
+    parts.push(`warning=${warning}`);
+  }
+
+  if (parts.length === 0) {
+    return "[web_fetch notice] truncated content";
+  }
+  return `[web_fetch notice] ${parts.join(" | ")}`;
 }
 
 function webFetchResult(result: Record<string, unknown>) {

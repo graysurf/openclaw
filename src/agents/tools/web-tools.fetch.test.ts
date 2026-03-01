@@ -210,10 +210,21 @@ describe("web_fetch extraction fallbacks", () => {
     });
 
     const result = await tool?.execute?.("call", { url: "https://example.com/long" });
+    const primaryText = Array.isArray(result?.content)
+      ? ((result.content[0] as { text?: unknown } | undefined)?.text as string | undefined)
+      : undefined;
     const details = result?.details as { text?: string; truncated?: boolean };
 
     expect(details.text?.length).toBeLessThanOrEqual(2000);
     expect(details.truncated).toBe(true);
+    expect(typeof primaryText).toBe("string");
+    expect(typeof details.text).toBe("string");
+    expect(primaryText).toContain("[web_fetch notice]");
+    expect(primaryText).toContain("truncated=");
+    expect(primaryText).toContain("status=200");
+    expect(primaryText).toContain("contentType=text/plain");
+    expect(primaryText).toContain("extractor=raw");
+    expect(primaryText).toContain(details.text as string);
   });
 
   it("honors maxChars even when wrapper overhead exceeds limit", async () => {
@@ -258,8 +269,14 @@ describe("web_fetch extraction fallbacks", () => {
       firecrawl: { enabled: false },
     });
     const result = await tool?.execute?.("call", { url: "https://example.com/stream" });
+    const primaryText = Array.isArray(result?.content)
+      ? ((result.content[0] as { text?: unknown } | undefined)?.text as string | undefined)
+      : undefined;
     const details = result?.details as { warning?: string } | undefined;
     expect(details?.warning).toContain("Response body truncated");
+    expect(typeof primaryText).toBe("string");
+    expect(primaryText).toContain("[web_fetch notice]");
+    expect(primaryText).toMatch(/warning=<<<EXTERNAL_UNTRUSTED_CONTENT id="[a-f0-9]{16}">>>/);
   });
 
   it("uses proxy-aware dispatcher when HTTP_PROXY is configured", async () => {
