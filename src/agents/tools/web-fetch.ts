@@ -6,7 +6,7 @@ import { wrapExternalContent, wrapWebContent } from "../../security/external-con
 import { normalizeSecretInput } from "../../utils/normalize-secret-input.js";
 import { stringEnum } from "../schema/typebox.js";
 import type { AnyAgentTool } from "./common.js";
-import { jsonResult, readNumberParam, readStringParam } from "./common.js";
+import { readNumberParam, readStringParam } from "./common.js";
 import {
   extractReadableContent,
   htmlToMarkdown,
@@ -677,6 +677,36 @@ async function runWebFetch(params: WebFetchRuntimeParams): Promise<Record<string
   }
 }
 
+function formatWebFetchPrimaryContent(result: Record<string, unknown>): string {
+  const text = result.text;
+  if (typeof text === "string" && text.trim().length > 0) {
+    return text;
+  }
+
+  try {
+    const serialized = JSON.stringify(result, null, 2);
+    if (typeof serialized === "string" && serialized.trim().length > 0) {
+      return serialized;
+    }
+  } catch {
+    // Fall through to a deterministic fallback string.
+  }
+
+  return "[web_fetch] extracted content unavailable; inspect details for metadata.";
+}
+
+function webFetchResult(result: Record<string, unknown>) {
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text: formatWebFetchPrimaryContent(result),
+      },
+    ],
+    details: result,
+  };
+}
+
 async function tryFirecrawlFallback(
   params: FirecrawlRuntimeParams & { url: string; extractMode: ExtractMode },
 ): Promise<{ text: string; title?: string } | null> {
@@ -767,7 +797,7 @@ export function createWebFetchTool(options?: {
         firecrawlStoreInCache: true,
         firecrawlTimeoutSeconds,
       });
-      return jsonResult(result);
+      return webFetchResult(result);
     },
   };
 }
