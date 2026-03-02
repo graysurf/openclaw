@@ -182,6 +182,41 @@ describe("cron tool", () => {
     );
   });
 
+  it("keeps paging cron.list until exhaustion while searching timeout-recovery job", async () => {
+    callGatewayMock.mockRejectedValueOnce(new Error("gateway timeout after 60000ms"));
+    for (let i = 0; i < 11; i += 1) {
+      const offset = i * 200;
+      const nextOffset = offset + 200;
+      callGatewayMock.mockResolvedValueOnce({
+        jobs: [{ id: `job-${i}`, state: {} }],
+        hasMore: true,
+        nextOffset,
+      });
+    }
+    callGatewayMock.mockResolvedValueOnce({
+      jobs: [{ id: "job-timeout", state: { runningAtMs: 456 } }],
+      hasMore: false,
+      nextOffset: null,
+    });
+
+    const tool = createCronTool();
+    const result = await tool.execute("call-timeout-many-pages", {
+      action: "run",
+      jobId: "job-timeout",
+    });
+
+    const calls = callGatewayMock.mock.calls.map((call) => call[0] as { method?: string });
+    const listCalls = calls.filter((call) => call.method === "cron.list");
+    expect(listCalls).toHaveLength(12);
+    expect(result.details).toEqual(
+      expect.objectContaining({
+        status: "running",
+        id: "job-timeout",
+        timedOut: true,
+      }),
+    );
+  });
+
   it("rethrows timeout when cron.run times out and job is not running", async () => {
     callGatewayMock
       .mockRejectedValueOnce(new Error("gateway timeout after 60000ms"))

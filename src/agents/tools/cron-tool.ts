@@ -28,7 +28,6 @@ const REMINDER_CONTEXT_TOTAL_MAX = 700;
 const REMINDER_CONTEXT_MARKER = "\n\nRecent context:\n";
 const DEFAULT_CRON_TOOL_TIMEOUT_MS = 60_000;
 const CRON_LIST_PAGE_LIMIT = 200;
-const CRON_LIST_MAX_PAGES = 10;
 
 // Flattened schema: runtime validates per-action requirements.
 const CronToolSchema = Type.Object(
@@ -267,7 +266,7 @@ async function findCronJobById(params: {
   id: string;
 }): Promise<CronListJobEntry | null> {
   let offset = 0;
-  for (let page = 0; page < CRON_LIST_MAX_PAGES; page += 1) {
+  for (;;) {
     const payload = await params.callGatewayTool<CronListPayload>("cron.list", params.gatewayOpts, {
       includeDisabled: true,
       limit: CRON_LIST_PAGE_LIMIT,
