@@ -26,6 +26,9 @@ const REMINDER_CONTEXT_MESSAGES_MAX = 10;
 const REMINDER_CONTEXT_PER_MESSAGE_MAX = 220;
 const REMINDER_CONTEXT_TOTAL_MAX = 700;
 const REMINDER_CONTEXT_MARKER = "\n\nRecent context:\n";
+const DEFAULT_CRON_TOOL_TIMEOUT_MS = 60_000;
+const CRON_LIST_PAGE_LIMIT = 200;
+const CRON_LIST_MAX_PAGES = 10;
 
 // Flattened schema: runtime validates per-action requirements.
 const CronToolSchema = Type.Object(
@@ -57,6 +60,21 @@ type GatewayToolCaller = typeof callGatewayTool;
 
 type CronToolDeps = {
   callGatewayTool?: GatewayToolCaller;
+};
+
+type CronListJobState = {
+  runningAtMs?: unknown;
+};
+
+type CronListJobEntry = {
+  id?: unknown;
+  state?: CronListJobState;
+};
+
+type CronListPayload = {
+  jobs?: unknown;
+  hasMore?: unknown;
+  nextOffset?: unknown;
 };
 
 type ChatMessage = {
@@ -207,6 +225,69 @@ function inferDeliveryFromSessionKey(agentSessionKey?: string): CronDelivery | n
   return delivery;
 }
 
+function isGatewayTimeoutError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.toLowerCase().includes("gateway timeout");
+}
+
+function readCronJobs(payload: unknown): CronListJobEntry[] {
+  if (Array.isArray(payload)) {
+    return payload as CronListJobEntry[];
+  }
+  if (isRecord(payload) && Array.isArray(payload.jobs)) {
+    return payload.jobs as CronListJobEntry[];
+  }
+  return [];
+}
+
+function readNextOffset(payload: unknown, currentOffset: number): number | null {
+  if (!isRecord(payload)) {
+    return null;
+  }
+  const hasMore = payload.hasMore === true;
+  const nextOffset = payload.nextOffset;
+  if (!hasMore || typeof nextOffset !== "number" || !Number.isFinite(nextOffset)) {
+    return null;
+  }
+  const floored = Math.floor(nextOffset);
+  return floored > currentOffset ? floored : null;
+}
+
+function isJobRunning(job: CronListJobEntry | null): boolean {
+  if (!job || !isRecord(job.state)) {
+    return false;
+  }
+  const runningAtMs = job.state.runningAtMs;
+  return typeof runningAtMs === "number" && Number.isFinite(runningAtMs) && runningAtMs > 0;
+}
+
+async function findCronJobById(params: {
+  callGatewayTool: GatewayToolCaller;
+  gatewayOpts: GatewayCallOptions;
+  id: string;
+}): Promise<CronListJobEntry | null> {
+  let offset = 0;
+  for (let page = 0; page < CRON_LIST_MAX_PAGES; page += 1) {
+    const payload = await params.callGatewayTool<CronListPayload>("cron.list", params.gatewayOpts, {
+      includeDisabled: true,
+      limit: CRON_LIST_PAGE_LIMIT,
+      offset,
+    });
+    const jobs = readCronJobs(payload);
+    const match =
+      jobs.find((job) => typeof job.id === "string" && job.id.trim() === params.id) ?? null;
+    if (match) {
+      return match;
+    }
+    const nextOffset = readNextOffset(payload, offset);
+    if (nextOffset === null) {
+      return null;
+    }
+    offset = nextOffset;
+  }
+  return null;
+}
+
 export function createCronTool(opts?: CronToolOptions, deps?: CronToolDeps): AnyAgentTool {
   const callGateway = deps?.callGatewayTool ?? callGatewayTool;
   return {
@@ -278,7 +359,7 @@ Use jobId as the canonical identifier; id is accepted for compatibility. Use con
         timeoutMs:
           typeof params.timeoutMs === "number" && Number.isFinite(params.timeoutMs)
             ? params.timeoutMs
-            : 60_000,
+            : DEFAULT_CRON_TOOL_TIMEOUT_MS,
       };
 
       switch (action) {
@@ -499,7 +580,37 @@ Use jobId as the canonical identifier; id is accepted for compatibility. Use con
           }
           const runMode =
             params.runMode === "due" || params.runMode === "force" ? params.runMode : "force";
-          return jsonResult(await callGateway("cron.run", gatewayOpts, { id, mode: runMode }));
+          try {
+            return jsonResult(await callGateway("cron.run", gatewayOpts, { id, mode: runMode }));
+          } catch (err) {
+            // cron.run is synchronous and can exceed gateway timeout; if the
+            // job is still running, report that state instead of hard-failing.
+            if (!isGatewayTimeoutError(err)) {
+              throw err;
+            }
+            try {
+              const job = await findCronJobById({
+                callGatewayTool: callGateway,
+                gatewayOpts,
+                id,
+              });
+              if (isJobRunning(job)) {
+                return jsonResult({
+                  ok: true,
+                  ran: true,
+                  status: "running",
+                  reason: "gateway-timeout",
+                  id,
+                  mode: runMode,
+                  timedOut: true,
+                  message: "cron.run timed out waiting for completion; job is still running",
+                });
+              }
+            } catch {
+              // Keep the original timeout behavior if we cannot verify run state.
+            }
+            throw err;
+          }
         }
         case "runs": {
           const id = readStringParam(params, "jobId") ?? readStringParam(params, "id");

@@ -151,6 +151,56 @@ describe("cron tool", () => {
     expect(call?.params).toEqual({ id: "job-due", mode: "due" });
   });
 
+  it("returns running status when cron.run times out but job is still running", async () => {
+    callGatewayMock
+      .mockRejectedValueOnce(new Error("gateway timeout after 60000ms"))
+      .mockResolvedValueOnce({
+        jobs: [{ id: "job-timeout", state: { runningAtMs: 123 } }],
+        hasMore: false,
+        nextOffset: null,
+      });
+
+    const tool = createCronTool();
+    const result = await tool.execute("call-timeout", {
+      action: "run",
+      jobId: "job-timeout",
+    });
+
+    expect(callGatewayMock).toHaveBeenCalledTimes(2);
+    expect(readGatewayCall(0).method).toBe("cron.run");
+    expect(readGatewayCall(1).method).toBe("cron.list");
+    expect(result.details).toEqual(
+      expect.objectContaining({
+        ok: true,
+        ran: true,
+        status: "running",
+        reason: "gateway-timeout",
+        id: "job-timeout",
+        mode: "force",
+        timedOut: true,
+      }),
+    );
+  });
+
+  it("rethrows timeout when cron.run times out and job is not running", async () => {
+    callGatewayMock
+      .mockRejectedValueOnce(new Error("gateway timeout after 60000ms"))
+      .mockResolvedValueOnce({
+        jobs: [{ id: "job-timeout", state: {} }],
+        hasMore: false,
+        nextOffset: null,
+      });
+
+    const tool = createCronTool();
+    await expect(
+      tool.execute("call-timeout-error", {
+        action: "run",
+        jobId: "job-timeout",
+      }),
+    ).rejects.toThrow("gateway timeout after 60000ms");
+    expect(callGatewayMock).toHaveBeenCalledTimes(2);
+  });
+
   it("normalizes cron.add job payloads", async () => {
     const tool = createCronTool();
     await tool.execute("call2", {
